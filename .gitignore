@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+.env
+.venv
+venv/
+env/
+*site-packages*/
+.yarn/
+node_modules/
+
+# Your local env folder
+yoloteleop/
+
+# Model artifacts
+*.pt
+*.pth
+*.onnx
+*.npz
+*.ckpt
+*.h5
