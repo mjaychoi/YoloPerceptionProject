@@ -21,3 +21,18 @@ yoloteleop/
 *.npz
 *.ckpt
 *.h5
+
+
+# macOS system files
+.DS_Store
+
+# cloned external repos
+Depth-Anything-3/
+webrtc-video-streaming/
+yoloteleop 2/
+
+# Python cache
+__pycache__/
+*.pyc
+
+
