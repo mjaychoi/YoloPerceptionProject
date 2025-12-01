@@ -49,6 +49,11 @@ MODE_EDGE = 3
 MODE_ALL = 4
 current_mode = MODE_YOLO
 
+# Interaction modes
+INTERACTION_PERCEPTION = "perception"  # Switch camera modes (depth, edge, yolo, etc.)
+INTERACTION_YOLO_ZOOM = "yolo_zoom"   # YOLO zoom mode (terminal commands)
+current_interaction_mode = INTERACTION_PERCEPTION  # Start in perception mode
+
 CLASS_ALIASES = {
     "person": ["person", "human"],
     "table": ["table", "desk", "workbench", "dining table", "coffee table"],
@@ -266,6 +271,10 @@ def parse_command(cmd: str) -> Dict[str, Any]:
     Return {"action": "zoom|focus|center|track|stop", "target": str, "which": "...", "level": float}
     """
     text = cmd.strip().lower()
+    
+    # Handle empty input
+    if not text:
+        return {"action": "stop", "target": None, "which": "largest", "level": DEFAULT_ZOOM}
 
     # action
     if any(w in text for w in ["stop", "cancel", "reset"]):
@@ -316,8 +325,23 @@ def parse_command(cmd: str) -> Dict[str, Any]:
                 candidate = re.sub(r"[^a-zA-Z ]", "", candidate).strip()
                 target = resolve_class(candidate)
             break
+    
+    # Try to extract target from text if not found by patterns
     if target is None:
-        target = resolve_class(text.split()[-1])
+        words = text.split()
+        if words:
+            # Try to find a meaningful target (skip common words)
+            skip_words = {"zoom", "focus", "on", "onto", "to", "the", "a", "in", "into", "center", "track", "stop", "cancel", "reset"}
+            for word in reversed(words):  # Start from the end
+                if word not in skip_words:
+                    target = resolve_class(word)
+                    break
+            # If still no target, use the last word
+            if target is None:
+                target = resolve_class(words[-1])
+        else:
+            # No words found, use a default
+            target = "person"  # Default fallback
 
     return {"action": action, "target": target, "which": which, "level": float(level)}
 
@@ -398,8 +422,12 @@ threading.Thread(target=input_thread, daemon=True).start()
 selected_id: Optional[int] = None
 intent: Optional[Dict[str, Any]] = None
 
-print("🎥 Running. Type commands like: 'zoom onto chair#2' or 'reset' to return to original view.")
-print("📹 Mode switching: Press '1' for YOLO, '2' for DepthAnything, '3' for Edge Detection, '4' for All Views")
+print("🎥 Running. Interaction Modes:")
+print("  Press 'm' to enter Perception Change Mode (switch camera modes)")
+print("  Press 'y' to enter YOLO Zoom Mode (terminal commands for zoom)")
+print("")
+print("📹 In Perception Mode: Press '1' for YOLO, '2' for DepthAnything, '3' for Edge Detection, '4' for All Views")
+print("🔍 In YOLO Zoom Mode: Type commands like 'zoom onto chair#2' or 'reset' in terminal")
 print("Press ESC in the video window to quit.")
 
 while True:
@@ -408,8 +436,8 @@ while True:
     dets = []
     frame = None
 
-    # Process any new commands (only in YOLO mode or ALL mode)
-    if current_mode == MODE_YOLO or current_mode == MODE_ALL:
+    # Process any new commands (only in YOLO zoom mode and YOLO/ALL camera modes)
+    if current_interaction_mode == INTERACTION_YOLO_ZOOM and (current_mode == MODE_YOLO or current_mode == MODE_ALL):
         while not cmd_q.empty():
             raw = cmd_q.get()
             parsed = parse_command(raw)
@@ -538,42 +566,72 @@ while True:
         H, W = frame.shape[:2]
         view = frame.copy()
 
-    if current_mode != MODE_ALL:
-        mode_names = {MODE_YOLO: "YOLO", MODE_DEPTH: "DepthAnything", MODE_EDGE: "Edge Detection"}
-        mode_text = f"Mode: {mode_names.get(current_mode, 'Unknown')} (Press 1/2/3/4)"
-        cv2.putText(view, mode_text, (10, H - 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+    # Display current interaction mode and camera mode
+    mode_names = {MODE_YOLO: "YOLO", MODE_DEPTH: "DepthAnything", MODE_EDGE: "Edge Detection"}
+    if current_interaction_mode == INTERACTION_PERCEPTION:
+        interaction_text = "Perception Mode (Press 'm' to stay, 'y' for zoom)"
     else:
-        mode_text = "All Views Mode (Press 1/2/3/4 to switch)"
-        text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+        interaction_text = "YOLO Zoom Mode (Press 'y' to stay, 'm' for camera modes)"
+    camera_mode_text = mode_names.get(current_mode, "Unknown") if current_mode != MODE_ALL else "All Views"
+    
+    if current_mode != MODE_ALL:
+        mode_text = f"Camera: {camera_mode_text} | {interaction_text}"
+        cv2.putText(view, mode_text, (10, H - 20), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+        # Add reminder about clicking window
+        reminder_text = "Click this window to use keyboard shortcuts (m/y/1/2/3/4)"
+        cv2.putText(view, reminder_text, (10, H - 50), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1, cv2.LINE_AA)
+    else:
+        mode_text = f"Camera: {camera_mode_text} | {interaction_text}"
+        text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
         text_x = (W - text_size[0]) // 2
         cv2.putText(view, mode_text, (text_x, H - 20), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+        # Add reminder about clicking window
+        reminder_text = "Click this window to use keyboard shortcuts (m/y/1/2/3/4)"
+        reminder_size = cv2.getTextSize(reminder_text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+        reminder_x = (W - reminder_size[0]) // 2
+        cv2.putText(view, reminder_text, (reminder_x, H - 50), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 0), 1, cv2.LINE_AA)
 
     cv2.imshow("LLM-Controlled Zoom (YOLO front-end)", view)
     
-    # Handle key presses for mode switching
+    # Handle key presses - 'm' and 'y' work in ALL modes to switch interaction modes
     key = cv2.waitKey(1) & 0xFF
     if key == 27:  # ESC = quit
         break
-    elif key == ord('1'):
-        current_mode = MODE_YOLO
-        intent = None
-        selected_id = None
-        print("✓ Switched to YOLO mode")
-    elif key == ord('2'):
-        current_mode = MODE_DEPTH
-        intent = None
-        selected_id = None
-        print("✓ Switched to DepthAnything mode")
-    elif key == ord('3'):
-        current_mode = MODE_EDGE
-        intent = None
-        selected_id = None
-        print("✓ Switched to Edge Detection mode")
-    elif key == ord('4'):
-        current_mode = MODE_ALL
-        print("✓ Switched to All Views mode (showing YOLO, Depth, and Edge side by side)")
+    elif key == ord('m') or key == ord('M'):
+        # Switch to perception change mode (works in any interaction mode)
+        current_interaction_mode = INTERACTION_PERCEPTION
+        print("✓ Switched to Perception Change Mode (Press 1/2/3/4 to change camera modes)")
+        print("   Note: Click on the video window to use keyboard shortcuts")
+    elif key == ord('y') or key == ord('Y'):
+        # Switch to YOLO zoom mode (works in any interaction mode)
+        current_interaction_mode = INTERACTION_YOLO_ZOOM
+        print("✓ Switched to YOLO Zoom Mode (Type commands in terminal for zoom)")
+        print("   Note: Click on the video window and press 'm' to switch back to camera modes")
+    
+    # Camera mode switching (only in perception mode)
+    if current_interaction_mode == INTERACTION_PERCEPTION:
+        if key == ord('1'):
+            current_mode = MODE_YOLO
+            intent = None
+            selected_id = None
+            print("✓ Switched to YOLO camera mode")
+        elif key == ord('2'):
+            current_mode = MODE_DEPTH
+            intent = None
+            selected_id = None
+            print("✓ Switched to DepthAnything camera mode")
+        elif key == ord('3'):
+            current_mode = MODE_EDGE
+            intent = None
+            selected_id = None
+            print("✓ Switched to Edge Detection camera mode")
+        elif key == ord('4'):
+            current_mode = MODE_ALL
+            print("✓ Switched to All Views camera mode (showing YOLO, Depth, and Edge side by side)")
 
 cap.release()
 cv2.destroyAllWindows()
